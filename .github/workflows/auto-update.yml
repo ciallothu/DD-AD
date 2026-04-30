@@ -1,4 +1,5 @@
 name: Update Filters
+
 on:
   push:
     paths-ignore:
@@ -7,8 +8,10 @@ on:
       - '.github/**'
       - '.devcontainer/**'
       - 'LICENSE'
+
   schedule:
-    - cron: 0 */8 * * *
+    - cron: '0 */8 * * *'
+
   workflow_dispatch:
     inputs:
       profile:
@@ -28,12 +31,14 @@ on:
         default: 'release'
         type: string
         description: 'Release branch name, if should-commit is false, this parameter will be ignored'
+
 env:
   TZ: Asia/Shanghai
 
 jobs:
   Update_Filters:
     runs-on: ubuntu-latest
+
     permissions:
       contents: write
       actions: write
@@ -59,7 +64,39 @@ jobs:
           echo "release-branch=${{ github.event.inputs.release-branch || 'release' }}" >> $GITHUB_OUTPUT
 
       - name: Run Jar
-        run:  mvn spring-boot:run -Dspring-boot.run.profiles=${{ steps.defaults.outputs.profile }}
+        run: mvn spring-boot:run -Dspring-boot.run.profiles=${{ steps.defaults.outputs.profile }}
+
+      - name: Generate Surge rules
+        run: |
+          # 生成 Surge DOMAIN-SET：适合大量广告域名，性能最好
+          awk '
+            /^[[:space:]]*-/ {
+              line=$0
+              sub(/^[[:space:]]*-[[:space:]]*/, "", line)
+              gsub(/^["'\''"]|["'\''"]$/, "", line)
+              gsub(/^[+]/, "", line)
+
+              # Surge DOMAIN-SET 不支持通配符 *，跳过
+              if (line == "" || line ~ /\*/) next
+
+              print line
+            }
+          ' rule/clash.yaml | sort -u > rule/surge-domainset.txt
+
+          # 生成 Surge RULE-SET：每行 DOMAIN-SUFFIX,domain
+          awk '
+            /^[[:space:]]*-/ {
+              line=$0
+              sub(/^[[:space:]]*-[[:space:]]*/, "", line)
+              gsub(/^["'\''"]|["'\''"]$/, "", line)
+              gsub(/^[+][.]/, "", line)
+              gsub(/^[.]/, "", line)
+
+              if (line == "" || line ~ /\*/) next
+
+              print "DOMAIN-SUFFIX," line
+            }
+          ' rule/clash.yaml | sort -u > rule/surge-ruleset.list
 
       - name: Archive tracking log
         if: hashFiles('logs/tracking.list') != ''
@@ -97,7 +134,7 @@ jobs:
       - name: Delete Workflow Runs
         uses: Mattraks/delete-workflow-runs@v2
         with:
-          token: ${{secrets.GITHUB_TOKEN}}
+          token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
           retain_days: 1
           keep_minimum_runs: 1
